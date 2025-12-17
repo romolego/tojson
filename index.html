@@ -36,7 +36,7 @@
     .drop .big { font-weight: 700; font-size: 13px; }
     .drop .small { margin-top: 6px; font-size: 12px; color: #6b7280; }
 
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
     th, td { border-bottom: 1px solid #e5e7eb; padding: 8px 6px; vertical-align: top; }
     th { text-align: left; color: #374151; font-weight: 700; background: #f9fafb; }
     td .muted { color: #6b7280; font-size: 11px; }
@@ -48,7 +48,7 @@
     .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
 
-    textarea, pre { width: 100%; min-height: 260px; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; font-size: 12px; line-height: 1.4; background: #fcfcfd; overflow: auto; }
+    textarea, pre { width: 100%; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; font-size: 12px; line-height: 1.4; background: #fcfcfd; overflow: auto; min-width: 0; box-sizing: border-box; }
     pre { margin: 0; white-space: pre; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
@@ -64,6 +64,21 @@
     .toolbar .left, .toolbar .right { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
     .small { font-size: 11px; color: #6b7280; }
+
+    .settings-placeholder { font-size: 12px; color: #6b7280; padding: 8px 10px; background: #f9fafb; border: 1px dashed #e5e7eb; border-radius: 10px; }
+    .settings-panel { display: none; flex-direction: column; gap: 10px; }
+    .settings-block { border: 1px solid #e5e7eb; border-radius: 10px; padding: 8px 10px; background: #f8fafc; }
+    details.settings-block { background: #fff; padding: 6px 10px; }
+    details.settings-block summary { cursor: pointer; font-weight: 700; font-size: 12px; color: #374151; }
+    details.settings-block .body { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+
+    .results-grid { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .table-wrap { border: 1px solid #e5e7eb; border-radius: 12px; overflow: auto; height: 240px; min-width: 0; }
+    .table-wrap table { min-width: 100%; }
+    .preview-area { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
+    @media (max-width: 900px) { .preview-area { grid-template-columns: 1fr; } }
+    .preview-pane { display: flex; flex-direction: column; gap: 8px; min-width: 0; height: 320px; }
+    .preview-pane pre, .preview-pane textarea { flex: 1; min-height: 0; height: 100%; }
   </style>
 
   <!--
@@ -102,60 +117,90 @@
 
     <h2>Настройки извлечения</h2>
 
-    <div class="col">
-      <div class="row">
-        <label style="min-width: 180px;">JSON: включать raw HTML (DOCX)</label>
-        <label><input id="optDocxHtml" type="checkbox" checked> да</label>
+    <div id="settingsPlaceholder" class="settings-placeholder">Загрузите файлы, настройки появятся автоматически</div>
+
+    <div id="settingsPanel" class="settings-panel">
+      <div class="settings-block">
+        <div class="row">
+          <label style="min-width: 180px;">Режим извлечения</label>
+          <label><input type="radio" name="mode" value="compact" checked> Компактный (LLM-friendly)</label>
+          <label><input type="radio" name="mode" value="full"> Полный</label>
+        </div>
+        <div class="row">
+          <label style="min-width: 180px;">Нормализация текста</label>
+          <select id="optNormalize">
+            <option value="light" selected>Лёгкая (переносы/пробелы)</option>
+            <option value="strict">Строгая (агрессивная очистка)</option>
+            <option value="none">Выключена</option>
+          </select>
+        </div>
       </div>
 
-      <div class="row">
-        <label style="min-width: 180px;">JSON: включать таблицы матрицей (XLSX)</label>
-        <label><input id="optXlsxMatrix" type="checkbox" checked> да</label>
-      </div>
+      <details id="sectionDocx" class="settings-block">
+        <summary>DOCX</summary>
+        <div class="body">
+          <div class="row">
+            <label style="min-width: 200px;">Включать raw HTML</label>
+            <label><input id="optDocxHtml" type="checkbox"> да</label>
+          </div>
+        </div>
+      </details>
 
-      <div class="row">
-        <label style="min-width: 180px;">JSON: включать карту ячеек (XLSX)</label>
-        <label><input id="optXlsxCells" type="checkbox"> да</label>
-      </div>
+      <details id="sectionXlsx" class="settings-block">
+        <summary>XLSX</summary>
+        <div class="body">
+          <div class="row">
+            <label style="min-width: 200px;">Включать таблицы матрицей</label>
+            <label><input id="optXlsxMatrix" type="checkbox" checked> да</label>
+          </div>
+          <div class="row">
+            <label style="min-width: 200px;">Включать карту ячеек</label>
+            <label><input id="optXlsxCells" type="checkbox"> да</label>
+          </div>
+        </div>
+      </details>
 
-      <div class="row">
-        <label style="min-width: 180px;">PDF: группировка строк (tolerance Y)</label>
-        <input id="optPdfY" type="number" min="0" step="0.5" value="2.0" />
-      </div>
+      <details id="sectionPdf" class="settings-block">
+        <summary>PDF</summary>
+        <div class="body">
+          <div class="row">
+            <label style="min-width: 200px;">Группировка строк (tolerance Y)</label>
+            <input id="optPdfY" type="number" min="0" step="0.5" value="2.0" />
+          </div>
+          <div class="row">
+            <label style="min-width: 200px;">Пробел по X-gap (px)</label>
+            <input id="optPdfSpace" type="number" min="0" step="0.5" value="2.0" />
+          </div>
+        </div>
+      </details>
 
-      <div class="row">
-        <label style="min-width: 180px;">PDF: пробел по X-gap (px)</label>
-        <input id="optPdfSpace" type="number" min="0" step="0.5" value="2.0" />
-      </div>
+      <details id="sectionPptx" class="settings-block">
+        <summary>PPTX</summary>
+        <div class="body">
+          <div class="row">
+            <label style="min-width: 200px;">Включать заметки (notes)</label>
+            <label><input id="optPptxNotes" type="checkbox" checked> да</label>
+          </div>
+        </div>
+      </details>
 
-      <div class="row">
-        <label style="min-width: 180px;">PPTX: включать заметки (notes)</label>
-        <label><input id="optPptxNotes" type="checkbox" checked> да</label>
-      </div>
-
-      <div class="row">
-        <label style="min-width: 180px;">Нормализация текста</label>
-        <select id="optNormalize">
-          <option value="light" selected>Лёгкая (переносы/пробелы)</option>
-          <option value="strict">Строгая (агрессивная очистка)</option>
-          <option value="none">Выключена</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <label style="min-width: 180px;">generic-file: сохранять base64</label>
-        <label><input id="optGenericBase64" type="checkbox" checked> да</label>
-      </div>
-
-      <div class="row">
-        <label style="min-width: 180px;">generic-file: максимум base64 (байт)</label>
-        <input id="optGenericBase64Limit" type="number" min="0" step="1024" value="512000" />
-      </div>
-
-      <div class="row">
-        <label style="min-width: 180px;">generic-file: максимум plainText (байт)</label>
-        <input id="optGenericPreviewLimit" type="number" min="1024" step="1024" value="200000" />
-      </div>
+      <details id="sectionGeneric" class="settings-block">
+        <summary>Generic файлы</summary>
+        <div class="body">
+          <div class="row">
+            <label style="min-width: 200px;">Сохранять base64</label>
+            <label><input id="optGenericBase64" type="checkbox" checked> да</label>
+          </div>
+          <div class="row">
+            <label style="min-width: 200px;">Максимум base64 (байт)</label>
+            <input id="optGenericBase64Limit" type="number" min="0" step="1024" value="512000" />
+          </div>
+          <div class="row">
+            <label style="min-width: 200px;">Максимум plainText (байт)</label>
+            <input id="optGenericPreviewLimit" type="number" min="1024" step="1024" value="200000" />
+          </div>
+        </div>
+      </details>
     </div>
 
     <div class="hr"></div>
@@ -201,47 +246,49 @@
       </div>
     </div>
 
-    <table id="tbl">
-      <thead>
-        <tr>
-          <th style="width: 28%;">Файл</th>
-          <th style="width: 10%;">Тип</th>
-          <th style="width: 12%;">Статус</th>
-          <th style="width: 20%;">Статистика</th>
-          <th style="width: 30%;">Действия</th>
-        </tr>
-      </thead>
-      <tbody id="tbody">
-        <tr><td colspan="5" class="muted">Файлы не загружены</td></tr>
-      </tbody>
-    </table>
-
-    <div class="hr"></div>
-
-    <div class="split">
-      <div>
-        <div class="toolbar" style="margin-bottom: 8px;">
-          <div class="left" style="gap: 6px;">
-            <strong style="font-size: 12px;">JSON (выбранный файл)</strong>
-            <span id="selectedLabel" class="small">файл не выбран</span>
-            <button id="btnResetSelection" class="btn muted" style="padding:6px 8px;">Сбросить выбор</button>
-          </div>
-          <div class="right">
-            <button id="btnCopyJson" class="btn" disabled>Копировать JSON</button>
-            <button id="btnDownloadJson" class="btn" disabled>Скачать JSON</button>
-          </div>
-        </div>
-        <pre id="jsonView" class="mono">Файл не выбран</pre>
+    <div class="results-grid">
+      <div class="table-wrap">
+        <table id="tbl">
+          <thead>
+            <tr>
+              <th style="width: 28%;">Файл</th>
+              <th style="width: 10%;">Тип</th>
+              <th style="width: 12%;">Статус</th>
+              <th style="width: 20%;">Статистика</th>
+              <th style="width: 30%;">Действия</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="5" class="muted">Файлы не загружены</td></tr>
+          </tbody>
+        </table>
       </div>
 
-      <div>
-        <div class="toolbar" style="margin-bottom: 8px;">
-          <div class="left"><strong style="font-size: 12px;">plainText (канонический текст)</strong></div>
-          <div class="right">
-            <button id="btnCopyText" class="btn" disabled>Копировать текст</button>
+      <div class="preview-area">
+        <div class="preview-pane">
+          <div class="toolbar" style="margin-bottom: 0;">
+            <div class="left" style="gap: 6px;">
+              <strong style="font-size: 12px;">JSON (выбранный файл)</strong>
+              <span id="selectedLabel" class="small">файл не выбран</span>
+              <button id="btnResetSelection" class="btn muted" style="padding:6px 8px;">Сбросить выбор</button>
+            </div>
+            <div class="right">
+              <button id="btnCopyJson" class="btn" disabled>Копировать JSON</button>
+              <button id="btnDownloadJson" class="btn" disabled>Скачать JSON</button>
+            </div>
           </div>
+          <pre id="jsonView" class="mono">Файл не выбран</pre>
         </div>
-        <textarea id="textView" class="mono" readonly></textarea>
+
+        <div class="preview-pane">
+          <div class="toolbar" style="margin-bottom: 0;">
+            <div class="left"><strong style="font-size: 12px;">plainText (канонический текст)</strong></div>
+            <div class="right">
+              <button id="btnCopyText" class="btn" disabled>Копировать текст</button>
+            </div>
+          </div>
+          <textarea id="textView" class="mono" readonly placeholder="файл не выбран"></textarea>
+        </div>
       </div>
     </div>
   </section>
@@ -289,7 +336,9 @@ function nowIso() {
    Опции
    ========================= */
 function readOptions() {
+  const mode = document.querySelector('input[name="mode"]:checked')?.value === "full" ? "full" : "compact";
   return {
+    mode,
     docxIncludeHtml: document.getElementById("optDocxHtml").checked,
     xlsxIncludeMatrix: document.getElementById("optXlsxMatrix").checked,
     xlsxIncludeCells: document.getElementById("optXlsxCells").checked,
@@ -301,6 +350,51 @@ function readOptions() {
     genericBase64Limit: Number(document.getElementById("optGenericBase64Limit").value || 0),
     genericPreviewLimit: Number(document.getElementById("optGenericPreviewLimit").value || 0),
   };
+}
+
+function kindsInQueue() {
+  const kinds = new Set();
+  for (const f of state.files) kinds.add(detectKind(f));
+  return kinds;
+}
+
+function renderSettings() {
+  const placeholder = document.getElementById("settingsPlaceholder");
+  const panel = document.getElementById("settingsPanel");
+  if (!placeholder || !panel) return;
+
+  if (!state.files.length) {
+    placeholder.style.display = "block";
+    panel.style.display = "none";
+    return;
+  }
+
+  placeholder.style.display = "none";
+  panel.style.display = "flex";
+
+  const kinds = kindsInQueue();
+  const genericVisible = kinds.has("generic") || kinds.has("text");
+
+  const pairs = [
+    ["docx", "sectionDocx"],
+    ["xlsx", "sectionXlsx"],
+    ["pdf", "sectionPdf"],
+    ["pptx", "sectionPptx"],
+  ];
+
+  for (const [kind, id] of pairs) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const show = kinds.has(kind);
+    el.style.display = show ? "block" : "none";
+    if (!show && el.open) el.open = false;
+  }
+
+  const genericEl = document.getElementById("sectionGeneric");
+  if (genericEl) {
+    genericEl.style.display = genericVisible ? "block" : "none";
+    if (!genericVisible && genericEl.open) genericEl.open = false;
+  }
 }
 
 /* =========================
@@ -392,6 +486,7 @@ function addFiles(files) {
   }
   state.files.push(...added);
   renderTable();
+  renderSettings();
 }
 
 function clearAll() {
@@ -406,6 +501,7 @@ function clearAll() {
   setSummary();
   document.getElementById("zipStatus").textContent = "";
   updateDownloadButtons();
+  renderSettings();
 }
 
 function getFileId(file) {
@@ -700,6 +796,9 @@ async function convertDocx(arrayBuffer, meta, opts) {
   const html = String(htmlRes?.value || "");
   const blocks = parseDocxHtmlToBlocks(html, opts);
 
+  const includeHtml = opts.mode === "full" && opts.docxIncludeHtml;
+  const includeRaw = opts.mode === "full";
+
   // Канонический текст: на базе blocks + запасной raw (для диагностики)
   const plainFromBlocks = normalizeText(blocksToPlainText(blocks), opts.normalize);
 
@@ -707,8 +806,8 @@ async function convertDocx(arrayBuffer, meta, opts) {
     meta,
     content: {
       kind: "docx",
-      rawText,
-      html: opts.docxIncludeHtml ? html : null,
+      rawText: includeRaw ? rawText : undefined,
+      html: includeHtml ? html : null,
       blocks,
       plainText: plainFromBlocks,
       diagnostics: {
@@ -871,7 +970,7 @@ async function convertXlsx(arrayBuffer, meta, opts) {
     }
 
     let cells = null;
-    if (opts.xlsxIncludeCells) {
+    if (opts.mode === "full" && opts.xlsxIncludeCells) {
       cells = extractXlsxCells(ws);
     }
 
@@ -943,6 +1042,8 @@ async function convertPptx(arrayBuffer, meta, opts) {
 
   const zip = await window.JSZip.loadAsync(arrayBuffer);
 
+  const isFull = opts.mode === "full";
+
   const slideFiles = Object.keys(zip.files)
     .filter(p => /^ppt\/slides\/slide\d+\.xml$/i.test(p))
     .sort((a, b) => slideNum(a) - slideNum(b));
@@ -952,23 +1053,31 @@ async function convertPptx(arrayBuffer, meta, opts) {
     .sort((a, b) => slideNum(a) - slideNum(b));
 
   const slides = [];
-  const blocks = [];
+  const blocks = isFull ? [] : null;
   let bi = 0;
+  const plainParts = [];
 
   for (const p of slideFiles) {
     const n = slideNum(p);
     const xml = await zip.file(p).async("text");
     const parsed = extractPptxTextFromSlideXml(xml);
 
-    slides.push({ slide: n, path: p, paragraphs: parsed.paragraphs, plain: parsed.plain });
+    const slideText = normalizeText(parsed.plain, opts.normalize);
+    slides.push(isFull
+      ? { slide: n, path: p, paragraphs: parsed.paragraphs, plain: slideText }
+      : { slide: n, text: slideText });
 
-    blocks.push({ type: "slide", index: bi++, slide: n, text: `Слайд ${n}` });
-    if (parsed.plain) blocks.push({ type: "paragraph", index: bi++, slide: n, text: parsed.plain });
-    blocks.push({ type: "separator", index: bi++, slide: n, text: "" });
+    if (slideText) plainParts.push(slideText);
+
+    if (isFull && blocks) {
+      blocks.push({ type: "slide", index: bi++, slide: n, text: `Слайд ${n}` });
+      if (slideText) blocks.push({ type: "paragraph", index: bi++, slide: n, text: slideText });
+      blocks.push({ type: "separator", index: bi++, slide: n, text: "" });
+    }
   }
 
   const notes = [];
-  if (opts.pptxIncludeNotes) {
+  if (isFull && opts.pptxIncludeNotes) {
     for (const p of notesFiles) {
       const n = slideNum(p);
       const xml = await zip.file(p).async("text");
@@ -976,21 +1085,24 @@ async function convertPptx(arrayBuffer, meta, opts) {
       notes.push({ slide: n, path: p, paragraphs: parsed.paragraphs, plain: parsed.plain });
 
       if (parsed.plain) {
-        blocks.push({ type: "notes", index: bi++, slide: n, text: `Заметки к слайду ${n}` });
-        blocks.push({ type: "paragraph", index: bi++, slide: n, text: parsed.plain });
-        blocks.push({ type: "separator", index: bi++, slide: n, text: "" });
+        if (blocks) {
+          blocks.push({ type: "notes", index: bi++, slide: n, text: `Заметки к слайду ${n}` });
+          blocks.push({ type: "paragraph", index: bi++, slide: n, text: parsed.plain });
+          blocks.push({ type: "separator", index: bi++, slide: n, text: "" });
+        }
+        plainParts.push(normalizeText(parsed.plain, opts.normalize));
       }
     }
   }
 
-  const plainText = normalizeText(blocksToPlainText(blocks.filter(b => b.type !== "separator")), opts.normalize);
+  const plainText = normalizeText(plainParts.join("\n\n"), opts.normalize);
 
   return {
     meta,
     content: {
       kind: "pptx",
       slides,
-      notes: opts.pptxIncludeNotes ? notes : null,
+      notes: isFull && opts.pptxIncludeNotes ? notes : null,
       blocks,
       plainText
     }
@@ -1043,8 +1155,10 @@ async function convertPdf(arrayBuffer, meta, opts) {
   const numPages = pdf.numPages;
 
   const pages = [];
-  const blocks = [];
+  const isFull = opts.mode === "full";
+  const blocks = isFull ? [] : null;
   let bi = 0;
+  const plainParts = [];
 
   for (let p = 1; p <= numPages; p++) {
     const page = await pdf.getPage(p);
@@ -1070,19 +1184,27 @@ async function convertPdf(arrayBuffer, meta, opts) {
     const pageText = lines.map(l => l.text).join("\n");
     const normPageText = normalizeText(pageText, opts.normalize);
 
-    pages.push({
+    pages.push(isFull ? {
       page: p,
       width: viewport.width,
       height: viewport.height,
-      lines
+      lines,
+      pageText: normPageText
+    } : {
+      page: p,
+      pageText: normPageText
     });
 
-    blocks.push({ type: "page", index: bi++, page: p, text: `Страница ${p}` });
-    if (normPageText) blocks.push({ type: "text", index: bi++, page: p, text: normPageText });
-    blocks.push({ type: "separator", index: bi++, page: p, text: "" });
+    if (normPageText) plainParts.push(normPageText);
+
+    if (isFull && blocks) {
+      blocks.push({ type: "page", index: bi++, page: p, text: `Страница ${p}` });
+      if (normPageText) blocks.push({ type: "text", index: bi++, page: p, text: normPageText });
+      blocks.push({ type: "separator", index: bi++, page: p, text: "" });
+    }
   }
 
-  const plainText = normalizeText(blocksToPlainText(blocks.filter(b => b.type !== "separator")), opts.normalize);
+  const plainText = normalizeText(plainParts.join("\n\n"), opts.normalize);
 
   return {
     meta,
@@ -1463,6 +1585,7 @@ renderTable();
 setKpi();
 setSummary();
 renderSelected(null);
+renderSettings();
 </script>
 </body>
 </html>
