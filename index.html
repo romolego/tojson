@@ -29,6 +29,7 @@
     .btn.danger { background: #fff; border-color: #ef4444; color: #b91c1c; }
     .btn.danger:hover { background: #fef2f2; }
     .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn.muted { color: #6b7280; border-style: dashed; }
 
     .drop { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 18px; background: #f8fafc; text-align: center; }
     .drop.drag { background: #eef2ff; border-color: #818cf8; }
@@ -90,12 +91,11 @@
 
     <div id="drop" class="drop">
       <div class="big">Перетащите файлы сюда</div>
-      <div class="small">или выберите через диалог ниже (поддерживаются: .docx .xlsx .pptx .pdf .txt .md .csv .json)</div>
+      <div class="small">или выберите через диалог ниже (поддерживаются любые форматы, попробуем извлечь максимум)</div>
     </div>
 
     <div style="margin-top: 10px;">
-      <input id="fileInput" type="file" multiple
-             accept=".docx,.xlsx,.xls,.pptx,.pdf,.txt,.md,.csv,.json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <input id="fileInput" type="file" multiple />
     </div>
 
     <div class="hr"></div>
@@ -141,6 +141,21 @@
           <option value="none">Выключена</option>
         </select>
       </div>
+
+      <div class="row">
+        <label style="min-width: 180px;">generic-file: сохранять base64</label>
+        <label><input id="optGenericBase64" type="checkbox" checked> да</label>
+      </div>
+
+      <div class="row">
+        <label style="min-width: 180px;">generic-file: максимум base64 (байт)</label>
+        <input id="optGenericBase64Limit" type="number" min="0" step="1024" value="512000" />
+      </div>
+
+      <div class="row">
+        <label style="min-width: 180px;">generic-file: максимум plainText (байт)</label>
+        <input id="optGenericPreviewLimit" type="number" min="1024" step="1024" value="200000" />
+      </div>
     </div>
 
     <div class="hr"></div>
@@ -151,7 +166,11 @@
         <button id="btnClear" class="btn danger">Очистить</button>
       </div>
       <div class="right">
-        <button id="btnDownloadAllJson" class="btn" disabled>Скачать пакет JSON</button>
+        <div class="row">
+          <button id="btnDownloadAllJson" class="btn" disabled title="bundle.json: все успешные файлы в одном JSON">Скачать bundle.json</button>
+          <button id="btnDownloadZip" class="btn" disabled title="ZIP: отдельный JSON для каждого успешно обработанного файла">Скачать ZIP (JSON пофайлово)</button>
+          <span id="zipStatus" class="small"></span>
+        </div>
       </div>
     </div>
 
@@ -202,13 +221,17 @@
     <div class="split">
       <div>
         <div class="toolbar" style="margin-bottom: 8px;">
-          <div class="left"><strong style="font-size: 12px;">JSON (выбранный файл)</strong></div>
+          <div class="left" style="gap: 6px;">
+            <strong style="font-size: 12px;">JSON (выбранный файл)</strong>
+            <span id="selectedLabel" class="small">файл не выбран</span>
+            <button id="btnResetSelection" class="btn muted" style="padding:6px 8px;">Сбросить выбор</button>
+          </div>
           <div class="right">
             <button id="btnCopyJson" class="btn" disabled>Копировать JSON</button>
             <button id="btnDownloadJson" class="btn" disabled>Скачать JSON</button>
           </div>
         </div>
-        <pre id="jsonView" class="mono">Выберите файл из списка после конвертации</pre>
+        <pre id="jsonView" class="mono">Файл не выбран</pre>
       </div>
 
       <div>
@@ -243,6 +266,7 @@ const state = {
   resultsById: new Map(), // id -> { ok, result, error, stats }
   selectedId: null,
   runId: 0,
+  zipInProgress: false,
 };
 
 function uid() {
@@ -273,6 +297,9 @@ function readOptions() {
     pdfSpaceXThreshold: Number(document.getElementById("optPdfSpace").value || 2.0),
     pptxIncludeNotes: document.getElementById("optPptxNotes").checked,
     normalize: document.getElementById("optNormalize").value, // light|strict|none
+    genericBase64: document.getElementById("optGenericBase64").checked,
+    genericBase64Limit: Number(document.getElementById("optGenericBase64Limit").value || 0),
+    genericPreviewLimit: Number(document.getElementById("optGenericPreviewLimit").value || 0),
   };
 }
 
@@ -305,6 +332,11 @@ fileInput.addEventListener("change", () => {
    ========================= */
 document.getElementById("btnClear").addEventListener("click", () => clearAll());
 document.getElementById("btnConvert").addEventListener("click", () => convertAll());
+document.getElementById("btnResetSelection").addEventListener("click", () => {
+  state.selectedId = null;
+  renderSelected(null);
+  highlightSelectedRow();
+});
 
 document.getElementById("btnCopyJson").addEventListener("click", async () => {
   const id = state.selectedId;
@@ -344,6 +376,8 @@ document.getElementById("btnDownloadAllJson").addEventListener("click", () => {
   }, "bundle.json");
 });
 
+document.getElementById("btnDownloadZip").addEventListener("click", () => downloadZipPerFile());
+
 /* =========================
    Управление файлами
    ========================= */
@@ -365,14 +399,22 @@ function clearAll() {
   state.resultsById.clear();
   state.selectedId = null;
   state.runId++;
+  state.zipInProgress = false;
   renderTable();
   renderSelected(null);
   setKpi();
   setSummary();
+  document.getElementById("zipStatus").textContent = "";
+  updateDownloadButtons();
 }
 
 function getFileId(file) {
   return file?.__id || null;
+}
+
+function getFileNameById(id) {
+  const f = state.files.find(x => getFileId(x) === id);
+  return f?.name || null;
 }
 
 /* =========================
@@ -386,10 +428,13 @@ async function convertAll() {
   // UI: сброс результатов
   state.resultsById.clear();
   state.selectedId = null;
+  state.zipInProgress = false;
   renderSelected(null);
   renderTable(true);
   setKpi();
   setSummary();
+  document.getElementById("zipStatus").textContent = "";
+  updateDownloadButtons();
 
   const btnConvert = document.getElementById("btnConvert");
   const btnClear = document.getElementById("btnClear");
@@ -425,7 +470,7 @@ async function convertAll() {
   btnClear.disabled = false;
 
   // Enable bundle download if at least one ok
-  document.getElementById("btnDownloadAllJson").disabled = okCount === 0;
+  updateDownloadButtons();
 }
 
 function normalizeError(e) {
@@ -445,7 +490,7 @@ function detectKind(file) {
   if (ext === "xlsx" || ext === "xls") return "xlsx";
   if (ext === "pptx") return "pptx";
   if (ext === "pdf") return "pdf";
-  if (ext === "txt" || ext === "md" || ext === "csv" || ext === "json") return "text";
+  if (ext === "txt" || ext === "md" || ext === "csv" || ext === "json" || ext === "log" || ext === "html" || ext === "xml" || ext === "yml" || ext === "yaml") return "text";
   // fallback by mime
   const mime = (file?.type || "").toLowerCase();
   if (mime.includes("pdf")) return "pdf";
@@ -453,7 +498,7 @@ function detectKind(file) {
   if (mime.includes("spreadsheetml")) return "xlsx";
   if (mime.includes("presentationml")) return "pptx";
   if (mime.startsWith("text/") || mime.includes("json") || mime.includes("csv")) return "text";
-  return "unknown";
+  return "generic";
 }
 
 async function processFile(file, opts) {
@@ -491,13 +536,7 @@ async function processFile(file, opts) {
     return convertText(text, meta, opts);
   }
 
-  // fallback: try read as text
-  try {
-    const text = await file.text();
-    return convertText(text, meta, opts);
-  } catch {
-    throw new Error(`Формат не поддержан: ${file.name}`);
-  }
+  return await convertGenericFile(file, meta, opts);
 }
 
 /* =========================
@@ -545,6 +584,24 @@ function safeName(s) {
     .slice(0, 160) || "result";
 }
 
+function baseNameWithoutExt(name) {
+  const clean = String(name || "");
+  const idx = clean.lastIndexOf(".");
+  const base = idx > 0 ? clean.slice(0, idx) : clean;
+  return base || "result";
+}
+
+function arrayBufferToBase64(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
 /* =========================
    Конвертер: TEXT
    ========================= */
@@ -558,6 +615,66 @@ function convertText(text, meta, opts) {
         { type: "text", index: 0, text: plain }
       ],
       plainText: plain
+    }
+  };
+}
+
+/* =========================
+   Конвертер: Generic file
+   ========================= */
+async function convertGenericFile(file, meta, opts) {
+  const arrayBuffer = await file.arrayBuffer();
+  const totalBytes = arrayBuffer.byteLength;
+
+  const previewLimit = Math.max(0, Number(opts.genericPreviewLimit || 0));
+  const previewBuffer = previewLimit > 0 && totalBytes > previewLimit
+    ? arrayBuffer.slice(0, previewLimit)
+    : arrayBuffer;
+
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  const plainRaw = decoder.decode(previewBuffer);
+  const plain = normalizeText(plainRaw, opts.normalize);
+  const plainTruncated = previewLimit > 0 && totalBytes > previewLimit;
+
+  const blocks = [ { type: "text", index: 0, text: plain } ];
+
+  const wantBase64 = !!opts.genericBase64;
+  const base64Limit = Math.max(0, Number(opts.genericBase64Limit || 0));
+  let base64 = null;
+  let base64Included = false;
+  let base64SkippedReason = null;
+
+  if (wantBase64) {
+    if (base64Limit > 0 && totalBytes > base64Limit) {
+      base64SkippedReason = `Размер ${totalBytes} байт превышает лимит ${base64Limit} байт`;
+    } else {
+      base64 = arrayBufferToBase64(arrayBuffer);
+      base64Included = true;
+    }
+  } else {
+    base64SkippedReason = "Сохранение base64 отключено";
+  }
+
+  const genericMeta = {
+    kind: "generic-file",
+    totalBytes,
+    base64Included,
+    base64Limit: base64Limit || null,
+    base64SkippedReason,
+    plainTextLimit: previewLimit || null,
+    plainTextTruncated,
+  };
+
+  return {
+    meta: { ...meta, kind: "generic-file", detectedKind: "generic-file", generic: genericMeta },
+    content: {
+      kind: "generic-file",
+      blocks,
+      plainText: plain,
+      binary: base64Included
+        ? { base64, size: totalBytes }
+        : { omitted: base64SkippedReason || "base64 не сохранён", size: totalBytes },
+      preview: { truncated: plainTruncated }
     }
   };
 }
@@ -917,7 +1034,12 @@ function extractPptxTextFromSlideXml(xml) {
 async function convertPdf(arrayBuffer, meta, opts) {
   if (!window.pdfjsLib) throw new Error("pdf.min.js не подключен");
 
-  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let pdf;
+  try {
+    pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  } catch (err) {
+    throw new Error(describePdfWorkerError(err));
+  }
   const numPages = pdf.numPages;
 
   const pages = [];
@@ -971,6 +1093,15 @@ async function convertPdf(arrayBuffer, meta, opts) {
       plainText
     }
   };
+}
+
+function describePdfWorkerError(err) {
+  const msg = normalizeError(err);
+  const lower = (msg || "").toLowerCase();
+  if (lower.includes("worker") || lower.includes("globalworkeroptions")) {
+    return `Не удалось загрузить pdf.worker.min.js: ${msg}. Проверьте расположение файла и настройку workerSrc.`;
+  }
+  return msg || "Ошибка при обработке PDF";
 }
 
 function groupPdfItemsIntoLines(items, yTol, spaceX) {
@@ -1105,27 +1236,17 @@ function renderTable(inConversion = false) {
     const actions = document.createElement("div");
     actions.className = "row";
 
-    const btnSelect = document.createElement("button");
-    btnSelect.className = "btn";
-    btnSelect.textContent = "Показать";
-    btnSelect.disabled = !(entry?.ok || entry?.error);
-    btnSelect.addEventListener("click", () => {
-      state.selectedId = id;
-      renderSelected(id);
-      highlightSelectedRow();
-    });
-
     const btnDl = document.createElement("button");
     btnDl.className = "btn";
     btnDl.textContent = "Скачать JSON";
     btnDl.disabled = !entry?.ok;
-    btnDl.addEventListener("click", () => {
+    btnDl.addEventListener("click", (e) => {
+      e.stopPropagation();
       if (!entry?.ok) return;
       const name = safeName(entry.result?.meta?.fileName || file.name) + ".json";
       downloadJson(entry.result, name);
     });
 
-    actions.appendChild(btnSelect);
     actions.appendChild(btnDl);
 
     if (entry?.error) {
@@ -1151,14 +1272,20 @@ function renderTable(inConversion = false) {
     tr.children[4].appendChild(actions);
 
     tr.dataset.id = id;
+    tr.addEventListener("click", (e) => {
+      if (e.target && e.target.closest && e.target.closest("button")) return;
+      if (!(entry?.ok || entry?.error)) return;
+      state.selectedId = id;
+      renderSelected(id);
+      highlightSelectedRow();
+    });
+
     tbody.appendChild(tr);
   }
 
   highlightSelectedRow();
 
-  // enable bundle download if any ok
-  const anyOk = [...state.resultsById.values()].some(v => v?.ok);
-  document.getElementById("btnDownloadAllJson").disabled = !anyOk;
+  updateDownloadButtons();
   setKpi();
   setSummary();
 }
@@ -1191,13 +1318,15 @@ function renderSelected(id) {
   const btnCopyJson = document.getElementById("btnCopyJson");
   const btnDownloadJson = document.getElementById("btnDownloadJson");
   const btnCopyText = document.getElementById("btnCopyText");
+  const selectedLabel = document.getElementById("selectedLabel");
 
   if (!id) {
-    jsonView.textContent = "Выберите файл из списка после конвертации";
+    jsonView.textContent = "Файл не выбран";
     textView.value = "";
     btnCopyJson.disabled = true;
     btnDownloadJson.disabled = true;
     btnCopyText.disabled = true;
+    selectedLabel.textContent = "файл не выбран";
     return;
   }
 
@@ -1208,6 +1337,7 @@ function renderSelected(id) {
     btnCopyJson.disabled = true;
     btnDownloadJson.disabled = true;
     btnCopyText.disabled = true;
+    selectedLabel.textContent = "файл не найден";
     return;
   }
 
@@ -1217,12 +1347,14 @@ function renderSelected(id) {
     btnCopyJson.disabled = false;
     btnDownloadJson.disabled = false;
     btnCopyText.disabled = !(textView.value && textView.value.length);
+    selectedLabel.textContent = entry.result?.meta?.fileName || "файл выбран";
   } else {
     jsonView.textContent = JSON.stringify({ error: entry.error || "Ошибка" }, null, 2);
     textView.value = "";
     btnCopyJson.disabled = false;
     btnDownloadJson.disabled = true;
     btnCopyText.disabled = true;
+    selectedLabel.textContent = getFileNameById(id) || "файл выбран";
   }
 }
 
@@ -1250,9 +1382,68 @@ function setSummary() {
   document.getElementById("summary").textContent = s;
 }
 
+function updateDownloadButtons() {
+  const anyOk = [...state.resultsById.values()].some(v => v?.ok);
+  const btnBundle = document.getElementById("btnDownloadAllJson");
+  const btnZip = document.getElementById("btnDownloadZip");
+  const zipStatus = document.getElementById("zipStatus");
+
+  btnBundle.disabled = !anyOk;
+  btnZip.disabled = !anyOk || state.zipInProgress;
+  if (!state.zipInProgress && !anyOk) zipStatus.textContent = "";
+}
+
 /* =========================
    Download helpers
    ========================= */
+async function downloadZipPerFile() {
+  const zipStatus = document.getElementById("zipStatus");
+  const entries = [...state.resultsById.entries()].filter(([, v]) => v?.ok);
+  if (!entries.length || state.zipInProgress) return;
+  if (!window.JSZip) {
+    zipStatus.textContent = "JSZip не загружен";
+    return;
+  }
+
+  state.zipInProgress = true;
+  updateDownloadButtons();
+  zipStatus.textContent = "Формируется ZIP…";
+
+  try {
+    const zip = new window.JSZip();
+    const used = new Map();
+
+    const nextName = (base) => {
+      const count = (used.get(base) || 0) + 1;
+      used.set(base, count);
+      return count === 1 ? base : `${base} (${count})`;
+    };
+
+    for (const [id, entry] of entries) {
+      const orig = entry.result?.meta?.fileName || getFileNameById(id) || "result";
+      const base = safeName(baseNameWithoutExt(orig));
+      const finalName = `${nextName(base)}.json`;
+      zip.file(finalName, JSON.stringify(entry.result, null, 2));
+    }
+
+    const blob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "results.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    zipStatus.textContent = "";
+  } catch (err) {
+    zipStatus.textContent = `Ошибка ZIP: ${normalizeError(err)}`;
+  } finally {
+    state.zipInProgress = false;
+    updateDownloadButtons();
+  }
+}
+
 function downloadJson(obj, fileName) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
