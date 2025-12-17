@@ -1,0 +1,1277 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>File → JSON Converter (DOCX / XLSX / PPTX / PDF)</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #fff; color: #111; }
+    header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 16px; margin: 0; font-weight: 700; }
+    header .muted { font-size: 12px; color: #6b7280; }
+
+    main { padding: 18px 20px; display: grid; grid-template-columns: 420px 1fr; gap: 16px; }
+    @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; background: #fff; }
+    .card h2 { margin: 0 0 10px 0; font-size: 14px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .col { display: flex; flex-direction: column; gap: 8px; }
+    label { font-size: 12px; color: #374151; }
+    input[type="file"] { width: 100%; }
+    input[type="number"], select { padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 12px; }
+    input[type="checkbox"] { transform: translateY(1px); }
+    .btn { padding: 8px 10px; font-size: 12px; border-radius: 10px; border: 1px solid #d1d5db; background: #f9fafb; cursor: pointer; }
+    .btn:hover { background: #f3f4f6; }
+    .btn.primary { background: #111827; border-color: #111827; color: #fff; }
+    .btn.primary:hover { background: #0b1220; }
+    .btn.danger { background: #fff; border-color: #ef4444; color: #b91c1c; }
+    .btn.danger:hover { background: #fef2f2; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .drop { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 18px; background: #f8fafc; text-align: center; }
+    .drop.drag { background: #eef2ff; border-color: #818cf8; }
+    .drop .big { font-weight: 700; font-size: 13px; }
+    .drop .small { margin-top: 6px; font-size: 12px; color: #6b7280; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px 6px; vertical-align: top; }
+    th { text-align: left; color: #374151; font-weight: 700; background: #f9fafb; }
+    td .muted { color: #6b7280; font-size: 11px; }
+    .status { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 11px; border: 1px solid #d1d5db; background: #f9fafb; }
+    .status.ok { border-color: #10b981; background: #ecfdf5; color: #065f46; }
+    .status.err { border-color: #ef4444; background: #fef2f2; color: #991b1b; }
+    .status.run { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
+
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+
+    textarea, pre { width: 100%; min-height: 260px; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; font-size: 12px; line-height: 1.4; background: #fcfcfd; overflow: auto; }
+    pre { margin: 0; white-space: pre; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+    .hint { font-size: 12px; color: #6b7280; line-height: 1.35; }
+    .hr { height: 1px; background: #e5e7eb; margin: 12px 0; }
+
+    .kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .kpi .box { border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; background: #fff; }
+    .kpi .box .t { font-size: 11px; color: #6b7280; }
+    .kpi .box .v { font-size: 13px; font-weight: 700; margin-top: 4px; }
+
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+    .toolbar .left, .toolbar .right { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    .small { font-size: 11px; color: #6b7280; }
+  </style>
+
+  <!--
+    Локальные библиотеки (положите файлы рядом с этим HTML):
+      - pdf.min.js
+      - pdf.worker.min.js
+      - mammoth.browser.min.js
+      - xlsx.full.min.js
+      - jszip.min.js
+  -->
+  <script src="./pdf.min.js"></script>
+  <script src="./mammoth.browser.min.js"></script>
+  <script src="./xlsx.full.min.js"></script>
+  <script src="./jszip.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>Конвертер файлов в JSON</h1>
+  <div class="muted">DOCX / XLSX / PPTX / PDF → структурированный JSON + канонический текст</div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Загрузка</h2>
+
+    <div id="drop" class="drop">
+      <div class="big">Перетащите файлы сюда</div>
+      <div class="small">или выберите через диалог ниже (поддерживаются: .docx .xlsx .pptx .pdf .txt .md .csv .json)</div>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <input id="fileInput" type="file" multiple
+             accept=".docx,.xlsx,.xls,.pptx,.pdf,.txt,.md,.csv,.json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+    </div>
+
+    <div class="hr"></div>
+
+    <h2>Настройки извлечения</h2>
+
+    <div class="col">
+      <div class="row">
+        <label style="min-width: 180px;">JSON: включать raw HTML (DOCX)</label>
+        <label><input id="optDocxHtml" type="checkbox" checked> да</label>
+      </div>
+
+      <div class="row">
+        <label style="min-width: 180px;">JSON: включать таблицы матрицей (XLSX)</label>
+        <label><input id="optXlsxMatrix" type="checkbox" checked> да</label>
+      </div>
+
+      <div class="row">
+        <label style="min-width: 180px;">JSON: включать карту ячеек (XLSX)</label>
+        <label><input id="optXlsxCells" type="checkbox"> да</label>
+      </div>
+
+      <div class="row">
+        <label style="min-width: 180px;">PDF: группировка строк (tolerance Y)</label>
+        <input id="optPdfY" type="number" min="0" step="0.5" value="2.0" />
+      </div>
+
+      <div class="row">
+        <label style="min-width: 180px;">PDF: пробел по X-gap (px)</label>
+        <input id="optPdfSpace" type="number" min="0" step="0.5" value="2.0" />
+      </div>
+
+      <div class="row">
+        <label style="min-width: 180px;">PPTX: включать заметки (notes)</label>
+        <label><input id="optPptxNotes" type="checkbox" checked> да</label>
+      </div>
+
+      <div class="row">
+        <label style="min-width: 180px;">Нормализация текста</label>
+        <select id="optNormalize">
+          <option value="light" selected>Лёгкая (переносы/пробелы)</option>
+          <option value="strict">Строгая (агрессивная очистка)</option>
+          <option value="none">Выключена</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="toolbar">
+      <div class="left">
+        <button id="btnConvert" class="btn primary">Конвертировать</button>
+        <button id="btnClear" class="btn danger">Очистить</button>
+      </div>
+      <div class="right">
+        <button id="btnDownloadAllJson" class="btn" disabled>Скачать пакет JSON</button>
+      </div>
+    </div>
+
+    <div style="margin-top: 10px;" class="hint">
+      Рекомендованная проверка качества: сравнивайте блоки (страницы/листы/слайды) и итоговый plainText.
+      Для нормативных документов используйте привязку к странице (PDF) и структуру (DOCX headings/tables).
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="toolbar" style="margin-bottom: 10px;">
+      <div class="left">
+        <h2 style="margin:0;">Результаты</h2>
+      </div>
+      <div class="right">
+        <span class="small" id="summary"></span>
+      </div>
+    </div>
+
+    <div class="kpi" style="margin-bottom: 12px;">
+      <div class="box">
+        <div class="t">Файлов обработано</div>
+        <div class="v" id="kpiFiles">0</div>
+      </div>
+      <div class="box">
+        <div class="t">Ошибок</div>
+        <div class="v" id="kpiErrors">0</div>
+      </div>
+    </div>
+
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th style="width: 28%;">Файл</th>
+          <th style="width: 10%;">Тип</th>
+          <th style="width: 12%;">Статус</th>
+          <th style="width: 20%;">Статистика</th>
+          <th style="width: 30%;">Действия</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr><td colspan="5" class="muted">Файлы не загружены</td></tr>
+      </tbody>
+    </table>
+
+    <div class="hr"></div>
+
+    <div class="split">
+      <div>
+        <div class="toolbar" style="margin-bottom: 8px;">
+          <div class="left"><strong style="font-size: 12px;">JSON (выбранный файл)</strong></div>
+          <div class="right">
+            <button id="btnCopyJson" class="btn" disabled>Копировать JSON</button>
+            <button id="btnDownloadJson" class="btn" disabled>Скачать JSON</button>
+          </div>
+        </div>
+        <pre id="jsonView" class="mono">Выберите файл из списка после конвертации</pre>
+      </div>
+
+      <div>
+        <div class="toolbar" style="margin-bottom: 8px;">
+          <div class="left"><strong style="font-size: 12px;">plainText (канонический текст)</strong></div>
+          <div class="right">
+            <button id="btnCopyText" class="btn" disabled>Копировать текст</button>
+          </div>
+        </div>
+        <textarea id="textView" class="mono" readonly></textarea>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* =========================
+   Инициализация PDF.js worker
+   ========================= */
+(function initPdfWorker() {
+  if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
+    // При запуске с локального файла важно, чтобы pdf.worker.min.js лежал рядом с html
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdf.worker.min.js";
+  }
+})();
+
+/* =========================
+   Состояние
+   ========================= */
+const state = {
+  files: /** @type {File[]} */([]),
+  resultsById: new Map(), // id -> { ok, result, error, stats }
+  selectedId: null,
+  runId: 0,
+};
+
+function uid() {
+  return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
+}
+
+function fmtBytes(n) {
+  if (!Number.isFinite(n)) return "";
+  const u = ["B","KB","MB","GB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < u.length-1) { v /= 1024; i++; }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+/* =========================
+   Опции
+   ========================= */
+function readOptions() {
+  return {
+    docxIncludeHtml: document.getElementById("optDocxHtml").checked,
+    xlsxIncludeMatrix: document.getElementById("optXlsxMatrix").checked,
+    xlsxIncludeCells: document.getElementById("optXlsxCells").checked,
+    pdfLineYTolerance: Number(document.getElementById("optPdfY").value || 2.0),
+    pdfSpaceXThreshold: Number(document.getElementById("optPdfSpace").value || 2.0),
+    pptxIncludeNotes: document.getElementById("optPptxNotes").checked,
+    normalize: document.getElementById("optNormalize").value, // light|strict|none
+  };
+}
+
+/* =========================
+   Drop / Input
+   ========================= */
+const drop = document.getElementById("drop");
+const fileInput = document.getElementById("fileInput");
+
+drop.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  drop.classList.add("drag");
+});
+drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault();
+  drop.classList.remove("drag");
+  const items = [...(e.dataTransfer?.files || [])];
+  addFiles(items);
+});
+
+fileInput.addEventListener("change", () => {
+  const items = [...(fileInput.files || [])];
+  addFiles(items);
+  fileInput.value = "";
+});
+
+/* =========================
+   UI кнопки
+   ========================= */
+document.getElementById("btnClear").addEventListener("click", () => clearAll());
+document.getElementById("btnConvert").addEventListener("click", () => convertAll());
+
+document.getElementById("btnCopyJson").addEventListener("click", async () => {
+  const id = state.selectedId;
+  if (!id) return;
+  const entry = state.resultsById.get(id);
+  if (!entry?.ok) return;
+  await navigator.clipboard.writeText(JSON.stringify(entry.result, null, 2));
+});
+
+document.getElementById("btnDownloadJson").addEventListener("click", () => {
+  const id = state.selectedId;
+  if (!id) return;
+  const entry = state.resultsById.get(id);
+  if (!entry?.ok) return;
+  downloadJson(entry.result, safeName(entry.result?.meta?.fileName || "result") + ".json");
+});
+
+document.getElementById("btnCopyText").addEventListener("click", async () => {
+  const t = document.getElementById("textView").value || "";
+  if (!t) return;
+  await navigator.clipboard.writeText(t);
+});
+
+document.getElementById("btnDownloadAllJson").addEventListener("click", () => {
+  const pack = [];
+  for (const [id, entry] of state.resultsById.entries()) {
+    if (entry?.ok) pack.push(entry.result);
+  }
+  downloadJson({
+    meta: {
+      kind: "bundle",
+      extractedAt: nowIso(),
+      count: pack.length,
+      generator: "File→JSON Converter (browser JS)",
+    },
+    items: pack
+  }, "bundle.json");
+});
+
+/* =========================
+   Управление файлами
+   ========================= */
+function addFiles(files) {
+  const added = [];
+  for (const f of files) {
+    if (!f || !f.name) continue;
+    const id = uid();
+    // Привязываем id к File через WeakMap-like подход: добавим свойство (в браузере допустимо)
+    Object.defineProperty(f, "__id", { value: id, enumerable: false });
+    added.push(f);
+  }
+  state.files.push(...added);
+  renderTable();
+}
+
+function clearAll() {
+  state.files = [];
+  state.resultsById.clear();
+  state.selectedId = null;
+  state.runId++;
+  renderTable();
+  renderSelected(null);
+  setKpi();
+  setSummary();
+}
+
+function getFileId(file) {
+  return file?.__id || null;
+}
+
+/* =========================
+   Основной конверт
+   ========================= */
+async function convertAll() {
+  if (!state.files.length) return;
+  const runId = ++state.runId;
+  const opts = readOptions();
+
+  // UI: сброс результатов
+  state.resultsById.clear();
+  state.selectedId = null;
+  renderSelected(null);
+  renderTable(true);
+  setKpi();
+  setSummary();
+
+  const btnConvert = document.getElementById("btnConvert");
+  const btnClear = document.getElementById("btnClear");
+  btnConvert.disabled = true;
+  btnClear.disabled = true;
+
+  let okCount = 0;
+  let errCount = 0;
+
+  for (const file of state.files) {
+    if (runId !== state.runId) break;
+
+    const id = getFileId(file);
+    state.resultsById.set(id, { ok: false, running: true });
+    renderTable(true);
+
+    try {
+      const result = await processFile(file, opts);
+      const stats = computeStats(result);
+      state.resultsById.set(id, { ok: true, result, stats });
+      okCount++;
+    } catch (e) {
+      state.resultsById.set(id, { ok: false, error: normalizeError(e) });
+      errCount++;
+    }
+
+    renderTable(true);
+    setKpi();
+    setSummary();
+  }
+
+  btnConvert.disabled = false;
+  btnClear.disabled = false;
+
+  // Enable bundle download if at least one ok
+  document.getElementById("btnDownloadAllJson").disabled = okCount === 0;
+}
+
+function normalizeError(e) {
+  if (!e) return "Unknown error";
+  if (typeof e === "string") return e;
+  if (e?.message) return e.message;
+  try { return JSON.stringify(e); } catch { return String(e); }
+}
+
+/* =========================
+   Определение типа
+   ========================= */
+function detectKind(file) {
+  const name = (file?.name || "").toLowerCase();
+  const ext = name.includes(".") ? name.split(".").pop() : "";
+  if (ext === "docx") return "docx";
+  if (ext === "xlsx" || ext === "xls") return "xlsx";
+  if (ext === "pptx") return "pptx";
+  if (ext === "pdf") return "pdf";
+  if (ext === "txt" || ext === "md" || ext === "csv" || ext === "json") return "text";
+  // fallback by mime
+  const mime = (file?.type || "").toLowerCase();
+  if (mime.includes("pdf")) return "pdf";
+  if (mime.includes("wordprocessingml")) return "docx";
+  if (mime.includes("spreadsheetml")) return "xlsx";
+  if (mime.includes("presentationml")) return "pptx";
+  if (mime.startsWith("text/") || mime.includes("json") || mime.includes("csv")) return "text";
+  return "unknown";
+}
+
+async function processFile(file, opts) {
+  const kind = detectKind(file);
+
+  const meta = {
+    kind: "document",
+    fileName: file.name,
+    fileSize: file.size,
+    fileType: file.type || null,
+    detectedKind: kind,
+    extractedAt: nowIso(),
+    generator: "File→JSON Converter (browser JS)",
+    options: opts,
+  };
+
+  if (kind === "docx") {
+    const ab = await file.arrayBuffer();
+    return await convertDocx(ab, meta, opts);
+  }
+  if (kind === "xlsx") {
+    const ab = await file.arrayBuffer();
+    return await convertXlsx(ab, meta, opts);
+  }
+  if (kind === "pptx") {
+    const ab = await file.arrayBuffer();
+    return await convertPptx(ab, meta, opts);
+  }
+  if (kind === "pdf") {
+    const ab = await file.arrayBuffer();
+    return await convertPdf(ab, meta, opts);
+  }
+  if (kind === "text") {
+    const text = await file.text();
+    return convertText(text, meta, opts);
+  }
+
+  // fallback: try read as text
+  try {
+    const text = await file.text();
+    return convertText(text, meta, opts);
+  } catch {
+    throw new Error(`Формат не поддержан: ${file.name}`);
+  }
+}
+
+/* =========================
+   Нормализация текста
+   ========================= */
+function normalizeText(s, mode) {
+  if (s == null) return "";
+  let t = String(s);
+
+  if (mode === "none") return t;
+
+  // Общая чистка
+  t = t.replace(/\u00A0/g, " ");   // NBSP → space
+  t = t.replace(/\r\n/g, "\n");    // Windows newlines
+  t = t.replace(/\r/g, "\n");
+
+  if (mode === "light") {
+    // 1) убрать хвостовые пробелы
+    t = t.split("\n").map(line => line.replace(/[ \t]+$/g, "")).join("\n");
+    // 2) сжать пробелы внутри (умеренно)
+    t = t.replace(/[ \t]{2,}/g, " ");
+    // 3) не трогать пустые строки (они важны для структуры)
+    return t.trimEnd();
+  }
+
+  if (mode === "strict") {
+    // 1) сжать пробелы
+    t = t.replace(/[ \t]{2,}/g, " ");
+    // 2) сжать пустые строки
+    t = t.replace(/\n{3,}/g, "\n\n");
+    // 3) убрать пробелы вокруг переносов
+    t = t.replace(/[ \t]+\n/g, "\n");
+    // 4) trim
+    return t.trim();
+  }
+
+  return t;
+}
+
+function safeName(s) {
+  return String(s || "")
+    .replace(/[\\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160) || "result";
+}
+
+/* =========================
+   Конвертер: TEXT
+   ========================= */
+function convertText(text, meta, opts) {
+  const plain = normalizeText(text, opts.normalize);
+  return {
+    meta,
+    content: {
+      kind: "text",
+      blocks: [
+        { type: "text", index: 0, text: plain }
+      ],
+      plainText: plain
+    }
+  };
+}
+
+/* =========================
+   Конвертер: DOCX (Mammoth)
+   Стратегия:
+     - mammoth.convertToHtml (для структуры)
+     - mammoth.extractRawText (для контрольного raw)
+     - parse HTML → blocks: heading/paragraph/list/table
+ ========================= */
+async function convertDocx(arrayBuffer, meta, opts) {
+  if (!window.mammoth) throw new Error("mammoth.browser.min.js не подключен");
+
+  const [rawRes, htmlRes] = await Promise.all([
+    window.mammoth.extractRawText({ arrayBuffer }),
+    window.mammoth.convertToHtml({ arrayBuffer }, {
+      // Можно расширять: стиль-мэппинг и т.п.
+    })
+  ]);
+
+  const rawText = normalizeText(rawRes?.value || "", opts.normalize);
+  const html = String(htmlRes?.value || "");
+  const blocks = parseDocxHtmlToBlocks(html, opts);
+
+  // Канонический текст: на базе blocks + запасной raw (для диагностики)
+  const plainFromBlocks = normalizeText(blocksToPlainText(blocks), opts.normalize);
+
+  return {
+    meta,
+    content: {
+      kind: "docx",
+      rawText,
+      html: opts.docxIncludeHtml ? html : null,
+      blocks,
+      plainText: plainFromBlocks,
+      diagnostics: {
+        warnings: (htmlRes?.messages || []).map(m => String(m?.message || m)).filter(Boolean),
+        rawLength: rawText.length,
+        blockPlainLength: plainFromBlocks.length,
+      }
+    }
+  };
+}
+
+function parseDocxHtmlToBlocks(html, opts) {
+  const blocks = [];
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html || "<p></p>", "text/html");
+  const body = doc.body;
+
+  let idx = 0;
+
+  function push(type, text, extra = {}) {
+    const t = normalizeText(text || "", opts.normalize);
+    if (!t && type !== "table") return;
+    blocks.push({ type, index: idx++, text: t, ...extra });
+  }
+
+  function walk(node) {
+    if (!node) return;
+    const tag = (node.tagName || "").toLowerCase();
+
+    if (tag === "h1" || tag === "h2" || tag === "h3" || tag === "h4" || tag === "h5" || tag === "h6") {
+      const level = Number(tag.slice(1));
+      push("heading", node.textContent || "", { level });
+      return;
+    }
+
+    if (tag === "p") {
+      push("paragraph", node.textContent || "");
+      return;
+    }
+
+    if (tag === "ul" || tag === "ol") {
+      const ordered = tag === "ol";
+      const items = [...node.querySelectorAll(":scope > li")];
+      let liNo = 0;
+      for (const li of items) {
+        liNo++;
+        const prefix = ordered ? (liNo + ". ") : "• ";
+        push("list_item", prefix + (li.textContent || ""), { ordered, item: liNo });
+      }
+      return;
+    }
+
+    if (tag === "table") {
+      const table = parseHtmlTable(node, opts);
+      blocks.push({
+        type: "table",
+        index: idx++,
+        text: normalizeText(tableToPlain(table), opts.normalize),
+        table
+      });
+      return;
+    }
+
+    // Прочие: рекурсивно по детям (чтобы не потерять вложенное)
+    if (node.childNodes && node.childNodes.length) {
+      for (const ch of node.childNodes) {
+        if (ch.nodeType === 1) walk(ch);
+      }
+    }
+  }
+
+  for (const child of [...body.children]) walk(child);
+
+  // Если HTML пустой, но raw есть — добавим хотя бы raw параграфом (как fallback)
+  if (!blocks.length) {
+    const t = normalizeText(body.textContent || "", opts.normalize);
+    if (t) blocks.push({ type: "text", index: 0, text: t });
+  }
+
+  return blocks;
+}
+
+function parseHtmlTable(tableEl, opts) {
+  const rows = [];
+  const trs = [...tableEl.querySelectorAll("tr")];
+  for (const tr of trs) {
+    const cells = [];
+    const tds = [...tr.querySelectorAll("th,td")];
+    for (const td of tds) {
+      const txt = normalizeText(td.textContent || "", opts.normalize);
+      const colspan = Number(td.getAttribute("colspan") || 1);
+      const rowspan = Number(td.getAttribute("rowspan") || 1);
+      cells.push({ text: txt, colspan, rowspan });
+    }
+    rows.push(cells);
+  }
+  return { rows };
+}
+
+function tableToPlain(table) {
+  if (!table?.rows?.length) return "";
+  return table.rows.map(r => r.map(c => c.text).join("\t")).join("\n");
+}
+
+function blocksToPlainText(blocks) {
+  const out = [];
+  for (const b of (blocks || [])) {
+    if (!b) continue;
+    if (b.type === "table" && b.table) {
+      out.push(tableToPlain(b.table));
+      out.push(""); // пустая строка-разделитель
+      continue;
+    }
+    if (typeof b.text === "string") out.push(b.text);
+    out.push(""); // разделитель блоков
+  }
+  // Уберём лишние финальные разделители
+  while (out.length && out[out.length - 1] === "") out.pop();
+  return out.join("\n");
+}
+
+/* =========================
+   Конвертер: XLSX (SheetJS)
+   Стратегия:
+     - workbook.SheetNames
+     - по каждому листу:
+         * matrix (header:1) — максимально устойчиво для таблиц
+         * csv — удобный человекочитаемый вариант
+         * merges — объединения
+         * (опц.) cells map — адрес -> {v,t,f,w}
+ ========================= */
+async function convertXlsx(arrayBuffer, meta, opts) {
+  if (!window.XLSX) throw new Error("xlsx.full.min.js не подключен");
+
+  const wb = window.XLSX.read(arrayBuffer, { type: "array", cellFormula: true, cellStyles: false });
+
+  const sheets = [];
+  const blocks = [];
+  let blockIndex = 0;
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+
+    const merges = (ws["!merges"] || []).map(m => ({
+      s: { r: m.s.r, c: m.s.c },
+      e: { r: m.e.r, c: m.e.c }
+    }));
+
+    const csv = window.XLSX.utils.sheet_to_csv(ws, { FS: "\t", RS: "\n", blankrows: true });
+
+    let matrix = null;
+    if (opts.xlsxIncludeMatrix) {
+      matrix = window.XLSX.utils.sheet_to_json(ws, {
+        header: 1,
+        raw: true,
+        defval: null,
+        blankrows: true
+      });
+    }
+
+    let cells = null;
+    if (opts.xlsxIncludeCells) {
+      cells = extractXlsxCells(ws);
+    }
+
+    const sheet = {
+      sheetName,
+      merges,
+      csv: normalizeText(csv, opts.normalize),
+      matrix,
+      cells
+    };
+
+    sheets.push(sheet);
+
+    // Blocks
+    blocks.push({ type: "sheet", index: blockIndex++, sheetName, text: `Лист: ${sheetName}` });
+
+    if (matrix && Array.isArray(matrix)) {
+      // как блок-таблица
+      const table = { rows: matrix.map(r => (r || []).map(v => ({ text: normalizeText(v == null ? "" : String(v), opts.normalize), colspan: 1, rowspan: 1 }))) };
+      blocks.push({ type: "table", index: blockIndex++, sheetName, text: normalizeText(tableToPlain(table), opts.normalize), table });
+    } else {
+      // fallback на CSV
+      const txt = normalizeText(csv, opts.normalize);
+      if (txt) blocks.push({ type: "text", index: blockIndex++, sheetName, text: txt });
+    }
+
+    blocks.push({ type: "separator", index: blockIndex++, sheetName, text: "" });
+  }
+
+  const plainText = normalizeText(blocksToPlainText(blocks.filter(b => b.type !== "separator")), opts.normalize);
+
+  return {
+    meta,
+    content: {
+      kind: "xlsx",
+      sheets,
+      blocks,
+      plainText
+    }
+  };
+}
+
+function extractXlsxCells(ws) {
+  const out = {};
+  // Пробегаем все ключи листа вида "A1", "B2", ...
+  for (const k of Object.keys(ws)) {
+    if (k[0] === "!") continue;
+    const cell = ws[k];
+    if (!cell) continue;
+    out[k] = {
+      v: cell.v ?? null,   // значение
+      t: cell.t ?? null,   // тип (s,n,b,d,e)
+      f: cell.f ?? null,   // формула
+      w: cell.w ?? null    // форматированное отображение
+    };
+  }
+  return out;
+}
+
+/* =========================
+   Конвертер: PPTX (JSZip)
+   Стратегия:
+     - распаковать pptx как zip
+     - slide*.xml: собрать текст по <a:p> и <a:t>
+     - (опц.) notesSlides/notesSlide*.xml: тоже собрать текст
+ ========================= */
+async function convertPptx(arrayBuffer, meta, opts) {
+  if (!window.JSZip) throw new Error("jszip.min.js не подключен");
+
+  const zip = await window.JSZip.loadAsync(arrayBuffer);
+
+  const slideFiles = Object.keys(zip.files)
+    .filter(p => /^ppt\/slides\/slide\d+\.xml$/i.test(p))
+    .sort((a, b) => slideNum(a) - slideNum(b));
+
+  const notesFiles = Object.keys(zip.files)
+    .filter(p => /^ppt\/notesSlides\/notesSlide\d+\.xml$/i.test(p))
+    .sort((a, b) => slideNum(a) - slideNum(b));
+
+  const slides = [];
+  const blocks = [];
+  let bi = 0;
+
+  for (const p of slideFiles) {
+    const n = slideNum(p);
+    const xml = await zip.file(p).async("text");
+    const parsed = extractPptxTextFromSlideXml(xml);
+
+    slides.push({ slide: n, path: p, paragraphs: parsed.paragraphs, plain: parsed.plain });
+
+    blocks.push({ type: "slide", index: bi++, slide: n, text: `Слайд ${n}` });
+    if (parsed.plain) blocks.push({ type: "paragraph", index: bi++, slide: n, text: parsed.plain });
+    blocks.push({ type: "separator", index: bi++, slide: n, text: "" });
+  }
+
+  const notes = [];
+  if (opts.pptxIncludeNotes) {
+    for (const p of notesFiles) {
+      const n = slideNum(p);
+      const xml = await zip.file(p).async("text");
+      const parsed = extractPptxTextFromSlideXml(xml);
+      notes.push({ slide: n, path: p, paragraphs: parsed.paragraphs, plain: parsed.plain });
+
+      if (parsed.plain) {
+        blocks.push({ type: "notes", index: bi++, slide: n, text: `Заметки к слайду ${n}` });
+        blocks.push({ type: "paragraph", index: bi++, slide: n, text: parsed.plain });
+        blocks.push({ type: "separator", index: bi++, slide: n, text: "" });
+      }
+    }
+  }
+
+  const plainText = normalizeText(blocksToPlainText(blocks.filter(b => b.type !== "separator")), opts.normalize);
+
+  return {
+    meta,
+    content: {
+      kind: "pptx",
+      slides,
+      notes: opts.pptxIncludeNotes ? notes : null,
+      blocks,
+      plainText
+    }
+  };
+}
+
+function slideNum(path) {
+  const m = path.match(/(\d+)\.xml$/);
+  return m ? Number(m[1]) : 0;
+}
+
+function extractPptxTextFromSlideXml(xml) {
+  // В PPTX текст обычно в <a:p> (параграф), внутри <a:t> (текстовые runs).
+  // Для качества группируем по параграфам.
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, "application/xml");
+
+  const paragraphs = [];
+  const pNodes = [...doc.getElementsByTagName("a:p")];
+
+  for (const p of pNodes) {
+    const tNodes = [...p.getElementsByTagName("a:t")];
+    const parts = tNodes.map(n => (n.textContent || "").trim()).filter(Boolean);
+    if (parts.length) paragraphs.push(parts.join(" "));
+  }
+
+  const plain = paragraphs.join("\n");
+  return { paragraphs, plain };
+}
+
+/* =========================
+   Конвертер: PDF (PDF.js)
+   Стратегия:
+     - page.getTextContent()
+     - items: {str, transform, width, height}
+     - сортировка и группировка по строкам:
+         * группируем по близким y (tolerance)
+         * внутри строки сортируем по x
+         * вставляем пробел по x-gap (spaceThreshold)
+ ========================= */
+async function convertPdf(arrayBuffer, meta, opts) {
+  if (!window.pdfjsLib) throw new Error("pdf.min.js не подключен");
+
+  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const numPages = pdf.numPages;
+
+  const pages = [];
+  const blocks = [];
+  let bi = 0;
+
+  for (let p = 1; p <= numPages; p++) {
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale: 1.0 });
+    const tc = await page.getTextContent();
+
+    const items = (tc.items || [])
+      .filter(it => it && typeof it.str === "string" && it.str.length)
+      .map(it => {
+        // transform: [a,b,c,d,e,f] where e=x, f=y in page space
+        const tr = it.transform || [1,0,0,1,0,0];
+        return {
+          str: it.str,
+          x: tr[4] ?? 0,
+          y: tr[5] ?? 0,
+          w: it.width ?? 0,
+          h: it.height ?? 0
+        };
+      });
+
+    const lines = groupPdfItemsIntoLines(items, opts.pdfLineYTolerance, opts.pdfSpaceXThreshold);
+
+    const pageText = lines.map(l => l.text).join("\n");
+    const normPageText = normalizeText(pageText, opts.normalize);
+
+    pages.push({
+      page: p,
+      width: viewport.width,
+      height: viewport.height,
+      lines
+    });
+
+    blocks.push({ type: "page", index: bi++, page: p, text: `Страница ${p}` });
+    if (normPageText) blocks.push({ type: "text", index: bi++, page: p, text: normPageText });
+    blocks.push({ type: "separator", index: bi++, page: p, text: "" });
+  }
+
+  const plainText = normalizeText(blocksToPlainText(blocks.filter(b => b.type !== "separator")), opts.normalize);
+
+  return {
+    meta,
+    content: {
+      kind: "pdf",
+      pages,
+      blocks,
+      plainText
+    }
+  };
+}
+
+function groupPdfItemsIntoLines(items, yTol, spaceX) {
+  if (!items.length) return [];
+
+  // В PDF y обычно растёт вверх. Для чтения удобнее сортировать сверху вниз: y desc, затем x asc
+  const sorted = [...items].sort((a, b) => (b.y - a.y) || (a.x - b.x));
+
+  /** @type {{y:number, items:any[]}[]} */
+  const groups = [];
+
+  for (const it of sorted) {
+    let g = null;
+    // Найдём ближайшую группу по y
+    for (let i = groups.length - 1; i >= 0; i--) {
+      const cand = groups[i];
+      if (Math.abs(cand.y - it.y) <= yTol) { g = cand; break; }
+      // небольшая оптимизация: если уже слишком далеко, можно остановиться
+      if (cand.y - it.y > yTol * 3) break;
+    }
+    if (!g) {
+      g = { y: it.y, items: [] };
+      groups.push(g);
+    }
+    g.items.push(it);
+    // уточняем y как среднее для устойчивости
+    g.y = (g.y * (g.items.length - 1) + it.y) / g.items.length;
+  }
+
+  // Теперь сформируем строки
+  const lines = groups
+    .sort((a, b) => b.y - a.y)
+    .map(g => {
+      const row = g.items.sort((a, b) => a.x - b.x);
+      let text = "";
+      let prevEnd = null;
+
+      for (const it of row) {
+        const part = it.str || "";
+        if (!part) continue;
+
+        if (prevEnd != null) {
+          const gap = it.x - prevEnd;
+          if (gap > spaceX) text += " ";
+        }
+
+        text += part;
+        prevEnd = it.x + (it.w || 0);
+      }
+
+      return {
+        y: g.y,
+        text: text.trimEnd(),
+        spans: row.map(it => ({ x: it.x, y: it.y, w: it.w, h: it.h, str: it.str }))
+      };
+    })
+    .filter(l => l.text && l.text.trim().length);
+
+  return lines;
+}
+
+/* =========================
+   Статистика
+   ========================= */
+function computeStats(result) {
+  const meta = result?.meta || {};
+  const content = result?.content || result?.content || result?.content;
+  const kind = result?.content?.kind || meta?.detectedKind || "unknown";
+  const plain = result?.content?.plainText || "";
+
+  const blocks = result?.content?.blocks || [];
+  const blockCount = Array.isArray(blocks) ? blocks.length : 0;
+
+  let pages = null, sheets = null, slides = null;
+  if (kind === "pdf") pages = result?.content?.pages?.length ?? null;
+  if (kind === "xlsx") sheets = result?.content?.sheets?.length ?? null;
+  if (kind === "pptx") slides = result?.content?.slides?.length ?? null;
+
+  return {
+    kind,
+    plainLength: plain.length,
+    blockCount,
+    pages, sheets, slides
+  };
+}
+
+/* =========================
+   Рендер таблицы
+   ========================= */
+function renderTable(inConversion = false) {
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
+
+  if (!state.files.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="5" class="muted">Файлы не загружены</td>`;
+    tbody.appendChild(tr);
+    document.getElementById("btnDownloadAllJson").disabled = true;
+    setKpi();
+    setSummary();
+    return;
+  }
+
+  for (const file of state.files) {
+    const id = getFileId(file);
+    const kind = detectKind(file);
+    const entry = state.resultsById.get(id);
+
+    const statusEl = document.createElement("span");
+    statusEl.className = "status";
+
+    let statusText = "Ожидание";
+    if (entry?.running) { statusText = "В работе"; statusEl.classList.add("run"); }
+    else if (entry?.ok) { statusText = "Готово"; statusEl.classList.add("ok"); }
+    else if (entry && !entry.ok && entry.error) { statusText = "Ошибка"; statusEl.classList.add("err"); }
+
+    statusEl.textContent = statusText;
+
+    const stats = entry?.stats;
+    const statText = stats
+      ? [
+          `blocks: ${stats.blockCount}`,
+          stats.pages != null ? `pages: ${stats.pages}` : null,
+          stats.sheets != null ? `sheets: ${stats.sheets}` : null,
+          stats.slides != null ? `slides: ${stats.slides}` : null,
+          `plain: ${stats.plainLength}`
+        ].filter(Boolean).join(", ")
+      : `${fmtBytes(file.size)}`;
+
+    const tr = document.createElement("tr");
+
+    const actions = document.createElement("div");
+    actions.className = "row";
+
+    const btnSelect = document.createElement("button");
+    btnSelect.className = "btn";
+    btnSelect.textContent = "Показать";
+    btnSelect.disabled = !(entry?.ok || entry?.error);
+    btnSelect.addEventListener("click", () => {
+      state.selectedId = id;
+      renderSelected(id);
+      highlightSelectedRow();
+    });
+
+    const btnDl = document.createElement("button");
+    btnDl.className = "btn";
+    btnDl.textContent = "Скачать JSON";
+    btnDl.disabled = !entry?.ok;
+    btnDl.addEventListener("click", () => {
+      if (!entry?.ok) return;
+      const name = safeName(entry.result?.meta?.fileName || file.name) + ".json";
+      downloadJson(entry.result, name);
+    });
+
+    actions.appendChild(btnSelect);
+    actions.appendChild(btnDl);
+
+    if (entry?.error) {
+      const err = document.createElement("div");
+      err.className = "muted";
+      err.style.marginTop = "4px";
+      err.textContent = entry.error;
+      actions.appendChild(err);
+    }
+
+    tr.innerHTML = `
+      <td>
+        <div><strong>${escapeHtml(file.name)}</strong></div>
+        <div class="muted">${escapeHtml(file.type || "unknown")} · ${escapeHtml(fmtBytes(file.size))}</div>
+      </td>
+      <td>${escapeHtml(kind)}</td>
+      <td></td>
+      <td>${escapeHtml(statText)}</td>
+      <td></td>
+    `;
+
+    tr.children[2].appendChild(statusEl);
+    tr.children[4].appendChild(actions);
+
+    tr.dataset.id = id;
+    tbody.appendChild(tr);
+  }
+
+  highlightSelectedRow();
+
+  // enable bundle download if any ok
+  const anyOk = [...state.resultsById.values()].some(v => v?.ok);
+  document.getElementById("btnDownloadAllJson").disabled = !anyOk;
+  setKpi();
+  setSummary();
+}
+
+function highlightSelectedRow() {
+  const tbody = document.getElementById("tbody");
+  const rows = [...tbody.querySelectorAll("tr")];
+  for (const r of rows) {
+    const id = r.dataset.id;
+    if (!id) continue;
+    r.style.background = (id === state.selectedId) ? "#f8fafc" : "";
+  }
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+/* =========================
+   Рендер выбранного файла
+   ========================= */
+function renderSelected(id) {
+  const jsonView = document.getElementById("jsonView");
+  const textView = document.getElementById("textView");
+  const btnCopyJson = document.getElementById("btnCopyJson");
+  const btnDownloadJson = document.getElementById("btnDownloadJson");
+  const btnCopyText = document.getElementById("btnCopyText");
+
+  if (!id) {
+    jsonView.textContent = "Выберите файл из списка после конвертации";
+    textView.value = "";
+    btnCopyJson.disabled = true;
+    btnDownloadJson.disabled = true;
+    btnCopyText.disabled = true;
+    return;
+  }
+
+  const entry = state.resultsById.get(id);
+  if (!entry) {
+    jsonView.textContent = "Нет данных по выбранному файлу";
+    textView.value = "";
+    btnCopyJson.disabled = true;
+    btnDownloadJson.disabled = true;
+    btnCopyText.disabled = true;
+    return;
+  }
+
+  if (entry.ok) {
+    jsonView.textContent = JSON.stringify(entry.result, null, 2);
+    textView.value = entry.result?.content?.plainText || "";
+    btnCopyJson.disabled = false;
+    btnDownloadJson.disabled = false;
+    btnCopyText.disabled = !(textView.value && textView.value.length);
+  } else {
+    jsonView.textContent = JSON.stringify({ error: entry.error || "Ошибка" }, null, 2);
+    textView.value = "";
+    btnCopyJson.disabled = false;
+    btnDownloadJson.disabled = true;
+    btnCopyText.disabled = true;
+  }
+}
+
+/* =========================
+   KPI / Summary
+   ========================= */
+function setKpi() {
+  const ok = [...state.resultsById.values()].filter(v => v?.ok).length;
+  const err = [...state.resultsById.values()].filter(v => v && !v.ok && v.error).length;
+  document.getElementById("kpiFiles").textContent = String(ok);
+  document.getElementById("kpiErrors").textContent = String(err);
+}
+
+function setSummary() {
+  const total = state.files.length;
+  const ok = [...state.resultsById.values()].filter(v => v?.ok).length;
+  const err = [...state.resultsById.values()].filter(v => v && !v.ok && v.error).length;
+  const run = [...state.resultsById.values()].filter(v => v?.running).length;
+
+  let s = `Всего: ${total}`;
+  if (run) s += ` · В работе: ${run}`;
+  if (ok) s += ` · Готово: ${ok}`;
+  if (err) s += ` · Ошибки: ${err}`;
+
+  document.getElementById("summary").textContent = s;
+}
+
+/* =========================
+   Download helpers
+   ========================= */
+function downloadJson(obj, fileName) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName || "result.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/* =========================
+   Старт
+   ========================= */
+renderTable();
+setKpi();
+setSummary();
+renderSelected(null);
+</script>
+</body>
+</html>
